@@ -1,4 +1,5 @@
-PyVKLogin -- VK.com log-in and autorization app for PyVK
-========================================================
+PyTeMidi -- python bindings to Tobias Erichsen Virtual MIDI
+===========================================================
 
-TODO
+See http://www.tobias-erichsen.de/software/virtualmidi.html
+for more information.
