@@ -479,7 +479,7 @@ try:
         def _close(self):
             self._device.close()
 
-        def _cb_messages(self, data):
+        def _cb_messages(self, device, data):
             self._parser.feed(data)
 
         def _send(self, message):
