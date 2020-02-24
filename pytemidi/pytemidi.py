@@ -467,6 +467,29 @@ def set_logging(bitmask=0):
     return virtualMIDILogging(bitmask)
 
 
+try:
+    import mido
+
+    class Port(mido.ports.BaseIOPort):
+        def _open(self, **kwargs):
+            self._device = Device(self.name)
+            self._device.register_callback(self._cb_messages)
+
+        def _close(self):
+            self._device.close()
+
+        def _cb_messages(self, data):
+            self._parser.feed(data)
+
+        def _send(self, message):
+            self._device.send(message.bin())
+
+except ImportError as e:
+    class Port(object):
+        def __init__(self):
+            raise e
+
+
 if __name__ == "__main__":
     import mido
     logging.basicConfig(level=logging.DEBUG)

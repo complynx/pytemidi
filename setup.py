@@ -137,7 +137,7 @@ setup(
     extras_require={  # Optional
         'dev': ['check-manifest'],
         'test': ['coverage'],
-        # 'gui': ['PyQt5', 'PyQtWebEngine']
+        'mido': ['mido']
     },
 
     # If there are data files included in your packages that need to be
