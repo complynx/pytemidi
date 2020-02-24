@@ -474,6 +474,7 @@ try:
         def _open(self, **kwargs):
             self._device = Device(self.name)
             self._device.register_callback(self._cb_messages)
+            self._device.create()
 
         def _close(self):
             self._device.close()
