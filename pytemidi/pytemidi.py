@@ -25,9 +25,6 @@ LOGGING_MISC = 1  # log internal stuff (port enable, disable...)
 LOGGING_RX = 2  # log data received from the driver
 LOGGING_TX = 4  # log data sent to the driver
 
-def realaddr(pointer):
-    return ctypes.cast(pointer, ctypes.c_void_p).value
-
 # This is the size of the buffer that is being used for communication
 # with the driver when instanciating a port with the old, deprecated
 # "virtualMIDICreatePort" function.  This value is currently 128kb - 1,
@@ -49,6 +46,10 @@ FLAGS_SUPPORTED = FLAGS_PARSE_RX | FLAGS_PARSE_TX | FLAGS_INSTANTIATE_RX_ONLY | 
 class MIDIPort(ctypes.Structure):
     """Wrapper for the VM_MIDI_PORT C struct."""
     pass
+
+
+def realaddr(pointer):
+    return ctypes.cast(pointer, ctypes.c_void_p).value
 
 
 MIDI_PORT = ctypes.POINTER(MIDIPort)  # Just a pointer, whatever is underneath, we don't care
@@ -218,7 +219,6 @@ def shutdown(_id):
     pointer = ctypes.c_void_p(_id)
     port = ctypes.cast(pointer, MIDI_PORT)
     virtualMIDIClosePort(port)
-    return virtualMIDIShutdown(port)
 
 
 GCTimer = 30 * 60  # 30 min
@@ -252,7 +252,7 @@ class GCThread(threading.Thread):
 
     def unified_callback(self, port, midi_bytes, length, additional):
         port_addr = realaddr(port)
-        dev = self.collection[port_addr]()
+        dev = self.collection[port_addr]() if port_addr in self.collection else None
         if dev is not None:
             try:
                 dev.call_callbacks(bytes(midi_bytes[:length]) if midi_bytes is not None else None)
@@ -273,7 +273,7 @@ GC = GCThread()
 
 class Device(object):
     def __init__(self, name="PyTeVirtualMIDI", manufacturer=None, product=None, raw_stream=False, no_output=False,
-                 no_input=False, sysex_size=DEFAULT_BUFFER_SIZE, raw_callback=None):
+                 no_input=False, sysex_size=DEFAULT_BUFFER_SIZE):
         self._name = name
         self._manufacturer = manufacturer
         self._product = product
@@ -284,10 +284,8 @@ class Device(object):
         self._cb_functions = weakref.WeakSet()
         self._cb_methods = weakref.WeakKeyDictionary()
         self._cb_lk = threading.RLock()
-        self._raw_callback = raw_callback
         self._id = None
         self._id_addr = 0
-        self._cb = None
 
     def close(self):
         GC.remove(self._id_addr)
@@ -302,10 +300,10 @@ class Device(object):
 
     def get_clients(self):
         buf = (ctypes.c_uint64*16)(*([0] * 16))
-        len = wintypes.DWORD(16*64)
-        ret = virtualMIDIGetProcesses(self._id, buf, ctypes.byref(len))
-        if ret.value:
-            return buf.value[:len.value/64]
+        _len = wintypes.DWORD(ctypes.sizeof(buf))
+        ret = virtualMIDIGetProcesses(self._id, buf, ctypes.byref(_len))
+        if ret != 0:
+            return [buf[i] for i in range(0, _len.value//ctypes.sizeof(ctypes.c_uint64))]
         else:
             raise DriverError(ctypes.GetLastError(), "couldn't get client PIDs")
 
@@ -390,17 +388,7 @@ class Device(object):
         puid = None
         if self._product is not None:
             puid = ctypes.byref(self._product)
-        if self._raw_callback is not None:
-            def cb_py(port, midi_bytes, length, additional):
-                try:
-                    self._raw_callback(midi_bytes[:length] if midi_bytes is not None else None)
-                except Exception:
-                    log.exception("Callback exception encountered")
-            cb = MIDI_DATA_CB(cb_py)
-            self._cb = cb
-        else:
-            cb = GC.unified_callback_ptr
-        _id = virtualMIDICreatePortEx3(self._name, cb, None, self._sysex_size, flags, muid, puid)
+        _id = virtualMIDICreatePortEx3(self._name, GC.unified_callback_ptr, None, self._sysex_size, flags, muid, puid)
         if _id is None:
             raise DriverError(ctypes.GetLastError(), "couldn't create the device")
         self._id = _id
@@ -475,12 +463,13 @@ virtualMIDILogging.restype = wintypes.DWORD
 virtualMIDILogging.argtypes = [wintypes.DWORD]
 
 
-def logging(bitmask=0):
+def set_logging(bitmask=0):
     return virtualMIDILogging(bitmask)
 
 
 if __name__ == "__main__":
     import mido
+    logging.basicConfig(level=logging.DEBUG)
 
     def test_cb(_, b):
         msg = mido.Message.from_bytes(b)
@@ -489,8 +478,9 @@ if __name__ == "__main__":
     print(get_library_version())
     dev = Device("test")
     dev.register_callback(test_cb)
-    logging(LOGGING_MISC|LOGGING_RX|LOGGING_TX)
+    set_logging(LOGGING_MISC|LOGGING_RX|LOGGING_TX)
     dev.create()
+    print(dev.get_clients())
     dev.send(mido.Message("note_on", channel=0, note=36, velocity=127).bin())
     dev.close()
 
